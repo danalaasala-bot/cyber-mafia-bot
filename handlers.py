@@ -24,8 +24,6 @@ def get_or_create_room(chat_id: int):
     return rooms[chat_id]
 
 
-# --- ИНТУИТИВНЫЕ И УДОБНЫЕ КЛАВИАТУРЫ ---
-
 def get_main_menu_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🕹️ Создать игру", callback_data="menu_create_lobby")],
@@ -51,7 +49,6 @@ def get_lobby_keyboard():
 
 
 def get_target_keyboard(room: dict, current_user_id: int, prefix: str):
-    # Исключаем мертвых игроков, а также самого себя (чтобы нельзя было голосовать за себя)
     alive_players = [p for p in room["players"] if p["alive"] and p["id"] != current_user_id]
     buttons = []
     
@@ -66,8 +63,6 @@ def get_target_keyboard(room: dict, current_user_id: int, prefix: str):
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-
-# --- 1. ГЛАВНОЕ МЕНЮ ---
 
 @router.message(Command("start"))
 async def cmd_start(message: Message):
@@ -88,8 +83,6 @@ async def cb_back_to_menu(callback: CallbackQuery):
     )
     await callback.message.edit_text(text, reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
 
-
-# --- 2. НАВИГАЦИЯ МЕНЮ ---
 
 @router.callback_query(F.data == "menu_create_lobby")
 async def cb_create_lobby(callback: CallbackQuery):
@@ -160,8 +153,6 @@ async def cb_menu_rules(callback: CallbackQuery):
     await callback.message.edit_text(text, reply_markup=get_back_to_menu_keyboard(), parse_mode=ParseMode.HTML)
 
 
-# --- 3. ЛОББИ И УПРАВЛЕНИЕ ИГРОКАМИ ---
-
 @router.callback_query(F.data == "join_game")
 async def cb_join_game(callback: CallbackQuery):
     room = get_or_create_room(callback.message.chat.id)
@@ -219,8 +210,6 @@ async def cb_add_bot(callback: CallbackQuery):
     )
     await callback.message.edit_text(text, reply_markup=get_lobby_keyboard(), parse_mode=ParseMode.HTML)
 
-
-# --- 4. ИГРОВЫЕ ФАЗЫ (НОЧЬ / ДЕНЬ) ---
 
 async def start_night_phase(bot: Bot, chat_id: int, room: dict):
     room["phase"] = "night"
@@ -343,6 +332,12 @@ async def finish_night_phase(bot: Bot, chat_id: int, room: dict):
     await process_morning_results(bot, chat_id, room, dead_player, winner)
     
     if not winner:
+        # Выводим утреннюю болтовню ботов
+        bot_messages = await game.get_bot_chat_messages(room)
+        for b_name, b_text in bot_messages:
+            await bot.send_message(chat_id, f"💬 <b>{b_name}:</b> {b_text}", parse_mode=ParseMode.HTML)
+            await asyncio.sleep(1)
+
         await send_day_voting_message(bot, chat_id, room)
 
 
@@ -380,8 +375,6 @@ async def cb_start_game(callback: CallbackQuery, bot: Bot):
 
     await start_night_phase(bot, chat_id, room)
 
-
-# --- 5. ОБРАБОТКА НОЧИ ---
 
 @router.callback_query(F.data.startswith("night_"))
 async def cb_night_action(callback: CallbackQuery, bot: Bot):
@@ -425,12 +418,8 @@ async def cb_night_action(callback: CallbackQuery, bot: Bot):
         await callback.answer("⚠️ Сейчас не ваш ход!", show_alert=True)
 
 
-# --- 6. ДНЕВНОЕ ГОЛОСОВАНИЕ ---
-
 async def send_day_voting_message(bot: Bot, chat_id: int, room: dict):
-    # Очищаем старые голоса перед началом нового голосования
     room["day"]["votes"] = {}
-    
     game.bot_vote(room)
     
     alive_humans = [p for p in room["players"] if p["alive"] and not p.get("bot")]
@@ -446,7 +435,7 @@ async def send_day_voting_message(bot: Bot, chat_id: int, room: dict):
         await asyncio.sleep(2)
         
         kicked_player, votes = game.end_day(room)
-        await process_evening_results(bot, chat_id, room, kicked_player)
+        await process_evening_results(bot, chat_id, room, kicked_player, votes)
         winner = game.check_winner(room)
 
         if winner:
@@ -493,10 +482,25 @@ async def cb_day_vote(callback: CallbackQuery, bot: Bot):
         await callback.answer("👀 Вы мертвы и можете только наблюдать за игрой.", show_alert=True)
         return
 
+    # Защита от повторного клика / двойного голоса
+    if voter_id in room["day"]["votes"]:
+        await callback.answer("⚠️ Вы уже проголосовали в этом раунде!", show_alert=True)
+        # Убираем клавиатуру у пользователя, чтобы не нажимал повторно
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        return
+
     game.save_vote(room, voter_id, target_id)
     target_player = next((p for p in room["players"] if p["id"] == target_id), None)
     
     await callback.answer(f"✅ Ваш голос против {target_player['name']} учтен!")
+    
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
 
     alive_humans = [p for p in room["players"] if p["alive"] and not p.get("bot")]
     voted_count = len(room["day"]["votes"])
@@ -505,7 +509,7 @@ async def cb_day_vote(callback: CallbackQuery, bot: Bot):
         await asyncio.sleep(2)
         kicked_player, votes = game.end_day(room)
         
-        await process_evening_results(bot, chat_id, room, kicked_player)
+        await process_evening_results(bot, chat_id, room, kicked_player, votes)
         winner = game.check_winner(room)
 
         if winner:
@@ -514,8 +518,6 @@ async def cb_day_vote(callback: CallbackQuery, bot: Bot):
             await asyncio.sleep(2)
             await start_night_phase(bot, chat_id, room)
 
-
-# --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ВЫВОДА ---
 
 async def process_morning_results(bot: Bot, chat_id, room, dead_player, winner):
     if winner:
@@ -533,9 +535,7 @@ async def process_morning_results(bot: Bot, chat_id, room, dead_player, winner):
     await bot.send_message(chat_id, player_list, parse_mode=ParseMode.HTML)
 
 
-async def process_evening_results(bot: Bot, chat_id, room, kicked_player):
-    votes = room["day"]["votes"]
-    
+async def process_evening_results(bot: Bot, chat_id, room, kicked_player, votes):
     voting_details = []
     for voter_id, target_id in votes.items():
         voter = next((p for p in room["players"] if p["id"] == voter_id), None)
