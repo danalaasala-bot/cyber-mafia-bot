@@ -15,18 +15,9 @@ BOT_PHRASES = [
 ]
 
 def generate_bot_name(existing_players):
-    names = [
-        "CyberNinja", "NeonHacker", "GlitchZero", "ByteGhost", 
-        "DataPhantom", "VortexAI", "SystemX", "NullPointer", 
-        "RootAdmin", "CoreMatrix", "EchoBot", "CipherUnit"
-    ]
-    existing_names = [p["name"] for p in existing_players]
-    available_names = [n for n in names if n not in existing_names]
-    
-    if not available_names:
-        return f"Bot_{len(existing_players) + 1}"
-    
-    return random.choice(available_names)
+    # Считаем, сколько уже ботов в списке, и даем следующий порядковый номер
+    bot_count = sum(1 for p in existing_players if p.get("bot")) + 1
+    return f"Бот {bot_count}"
 
 
 def start_game(room):
@@ -107,6 +98,7 @@ def finish_night(room):
             if player["id"] == killed_id and player["alive"]:
                 player["alive"] = False
                 dead_player = player
+                room["history"]["dead_roles"][player["id"]] = player["role"]
                 break
                 
     winner = check_winner(room)
@@ -159,6 +151,7 @@ def end_day(room):
         if player["id"] == kicked_id and player["alive"]:
             player["alive"] = False
             kicked_player = player
+            room["history"]["dead_roles"][player["id"]] = player["role"]
             break
             
     return kicked_player, vote_counts
