@@ -137,6 +137,7 @@ def end_day(room):
     if not vote_counts:
         return None, {}
         
+    # Находим максимальное количество голосов
     max_votes = max(vote_counts.values())
     top_targets = [t_id for t_id, count in vote_counts.items() if count == max_votes]
     
