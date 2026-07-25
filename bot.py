@@ -14,17 +14,20 @@ dp = Dispatcher()
 
 active_timers = {}
 
-# --- Веб-сервер для Render, чтобы не было ошибки тайм-аута ---
-async def handle(request):
-    return web.Response(text="Mafia Bot is running and alive!")
+# --- Надежный веб-сервер для Render ---
+routes = web.RouteTableDef()
 
-app = web.Application()
-app.router.add_get("/", handle)
-runner = web.AppRunner(app)
+@routes.get("/")
+async def hello(request):
+    return web.Response(text="Mafia Bot is running!")
 
 async def start_web_server():
-    port = int(os.getenv("PORT", 10000))
+    app = web.Application()
+    app.add_routes(routes)
+    runner = web.AppRunner(app)
     await runner.setup()
+    
+    port = int(os.getenv("PORT", 10000))
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
     print(f"Web server started on port {port}")
@@ -134,7 +137,7 @@ async def announce_winner(chat_id, winner):
 async def main():
     # Запускаем веб-сервер в фоновой задаче, чтобы порт открылся моментально
     asyncio.create_task(start_web_server())
-
+    
     dp.include_router(router)
     logging.basicConfig(level=logging.INFO)
     print("Бот и веб-сервер запущены!")
