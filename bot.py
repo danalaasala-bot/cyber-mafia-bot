@@ -3,7 +3,7 @@ import logging
 import os
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
-from aiohttp import web  # <--- Добавили импорт для веб-сервера
+from aiohttp import web
 
 from config import TOKEN
 from handlers import router
