@@ -23,6 +23,18 @@ def get_or_create_room(chat_id: int):
         }
     return rooms[chat_id]
 
+def reset_room(chat_id: int):
+    rooms[chat_id] = {
+        "started": False,
+        "phase": "lobby",
+        "players": [],
+        "round": 1,
+        "night": {"kill": None, "heal": None, "check": None, "subphase": "mafia"},
+        "day": {"votes": {}},
+        "history": {"dead_roles": {}, "voting_history": []}
+    }
+    return rooms[chat_id]
+
 def get_main_menu_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🕹️ Создать игру", callback_data="menu_create_lobby")],
@@ -61,15 +73,21 @@ def get_target_keyboard(room: dict, current_user_id: int, prefix: str):
 
 @router.message(Command("start"))
 async def cmd_start(message: Message):
+    chat_id = message.chat.id
+    reset_room(chat_id)  # Полный сброс комнаты и счетчика игроков при /start
+
     text = (
         "🤖 <b>CyberMafiaBot — Главное меню</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "Добро пожаловать! Выберите нужный пункт с помощью кнопок ниже:"
+        "Добро пожаловать! Лобби сброшено. Выберите нужный пункт с помощью кнопок ниже:"
     )
     await message.answer(text, reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
 
 @router.callback_query(F.data == "back_to_menu")
 async def cb_back_to_menu(callback: CallbackQuery):
+    chat_id = callback.message.chat.id
+    reset_room(chat_id)  # Сбрасываем при возврате в меню
+
     text = (
         "🤖 <b>CyberMafiaBot — Главное меню</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -109,7 +127,7 @@ async def cb_menu_join_lobby(callback: CallbackQuery):
     chat_id = callback.message.chat.id
     room = rooms.get(chat_id)
 
-    if room and not room["started"]:
+    if room and not room["started"] and len(room["players"]) > 0:
         text = (
             "🎮 <b>Игровое лобби</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -517,22 +535,28 @@ async def process_evening_results(bot: Bot, chat_id, room, kicked_player, votes)
         if voter and target:
             voting_details.append(f"• <b>{voter['name']}</b> ➔ {target['name']}")
 
-    votes_text = "\n".join(voting_details) if voting_details else "Никто не проголосовал."
-
-    if kicked_player:
+    if not voting_details:
         text = (
             f"🌆 <b>Итоги трибунала</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📋 <b>Голоса:</b>\n{votes_text}\n\n"
-            f"⚖️ Большинством голосов изгнан: <b>{kicked_player['name']}</b> (Роль: <i>{kicked_player['role']}</i>)"
+            f"Никто не проголосовал."
         )
     else:
-        text = (
-            f"🌆 <b>Итоги трибунала</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📋 <b>Голоса:</b>\n{votes_text}\n\n"
-            f"🤝 Голоса разделились поровну, никто не изгнан."
-        )
+        votes_text = "\n".join(voting_details)
+        if kicked_player:
+            text = (
+                f"🌆 <b>Итоги трибунала</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"📋 <b>Голоса:</b>\n{votes_text}\n\n"
+                f"⚖️ Большинством голосов изгнан: <b>{kicked_player['name']}</b> (Роль: <i>{kicked_player['role']}</i>)"
+            )
+        else:
+            text = (
+                f"🌆 <b>Итоги трибунала</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"📋 <b>Голоса:</b>\n{votes_text}\n\n"
+                f"🤝 Голоса разделились поровну, никто не изгнан."
+            )
 
     await bot.send_message(chat_id, text, parse_mode=ParseMode.HTML)
 
