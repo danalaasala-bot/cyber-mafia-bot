@@ -428,7 +428,9 @@ async def cb_night_action(callback: CallbackQuery, bot: Bot):
 # --- 6. ДНЕВНОЕ ГОЛОСОВАНИЕ ---
 
 async def send_day_voting_message(bot: Bot, chat_id: int, room: dict):
-    # Автоматически проголосовываем ботов перед началом сбора голосов людей
+    # Очищаем старые голоса перед началом нового голосования
+    room["day"]["votes"] = {}
+    
     game.bot_vote(room)
     
     alive_humans = [p for p in room["players"] if p["alive"] and not p.get("bot")]
@@ -460,14 +462,12 @@ async def send_day_voting_message(bot: Bot, chat_id: int, room: dict):
         "Обсудите улики и выберите игрока, которого хотите изгнать:"
     )
     
-    # Рассылаем клавиатуру голосования КАЖДОМУ живому игроку-человеку
     for human in alive_humans:
         kb = get_target_keyboard(room, human["id"], f"day_vote_{chat_id}")
         target_chat = chat_id if room.get("is_private", False) else human["id"]
         try:
             await bot.send_message(target_chat, text, reply_markup=kb, parse_mode=ParseMode.HTML)
         except Exception:
-            # Если боту в ЛС написать не получилось, дублируем в общий чат
             await bot.send_message(chat_id, f"⚠️ {human['name']}, откройте ЛС с ботом для голосования!", parse_mode=ParseMode.HTML)
 
 
@@ -531,13 +531,11 @@ async def process_morning_results(bot: Bot, chat_id, room, dead_player, winner):
     
     player_list = game.get_formatted_player_list(room)
     await bot.send_message(chat_id, player_list, parse_mode=ParseMode.HTML)
-    # ❌ Блок с болтовней ботов полностью удален (они молчат)
 
 
 async def process_evening_results(bot: Bot, chat_id, room, kicked_player):
     votes = room["day"]["votes"]
     
-    # Собираем красивый список: кто за кого проголосовал
     voting_details = []
     for voter_id, target_id in votes.items():
         voter = next((p for p in room["players"] if p["id"] == voter_id), None)
