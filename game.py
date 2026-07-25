@@ -1,6 +1,12 @@
 import random
 
-# Пул уникальных реплик для ботов, чтобы они говорили разное и не повторялись
+rooms = {}
+
+BOT_NAMES = [
+    "Алексей 🕶", "Дмитрий ☕️", "Елена 🦊", "Артём 🎧", 
+    "София 👑", "Максим ⚡️", "Виктория 🌸", "Игорь 🎲"
+]
+
 BOT_PHRASES = [
     "Мне кажется, ночью кто-то слишком подозрительно себя вел... Нужно присмотреться к тихим игрокам.",
     "Серьезно, прошлой ночью было жарковато. У меня есть пара кандидатур на проверку.",
@@ -15,20 +21,14 @@ BOT_PHRASES = [
 ]
 
 def generate_bot_name(existing_players):
-    # Считаем, сколько уже ботов в списке, и даем следующий порядковый номер
     bot_count = sum(1 for p in existing_players if p.get("bot")) + 1
     return f"Бот {bot_count}"
-
 
 def start_game(room):
     players = room["players"]
     num_players = len(players)
     
-    # Распределение ролей в зависимости от количества игроков
-    # 3-4 игрока: 1 мафия, 1 доктор, 1 комиссар, остальные мирные
-    # 5+ игроков: пропорционально
     roles = ["Мафия", "Доктор", "Комиссар"]
-    
     while len(roles) < num_players:
         roles.append("Мирный житель")
         
@@ -38,7 +38,6 @@ def start_game(room):
         player["role"] = roles[i]
         player["alive"] = True
 
-
 def get_role_card(role: str) -> str:
     cards = {
         "Мафия": (
@@ -47,7 +46,7 @@ def get_role_card(role: str) -> str:
             "<i>Ваша цель — устранить всех мирных граждан и захватить контроль над сетью. Каждую ночь вы выбираете жертву. Не выдавайте себя днем!</i>"
         ),
         "Доктор": (
-            "🩺 <b>ВАША РОЛЬ: ДОКТОРА (МЕДИК)</b>\n"
+            "🩺 <b>ВАША РОЛЬ: ДОКТОР (МЕДИК)</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
             "<i>Ваша цель — защищать участников системы. Каждую ночь вы можете выбрать одного игрока (включая себя), чтобы спасти его от ликвидации.</i>"
         ),
@@ -64,32 +63,26 @@ def get_role_card(role: str) -> str:
     }
     return cards.get(role, "🎮 Ваша роль засекречена.")
 
-
 def save_kill(room, target_id):
     room["night"]["kill"] = target_id
-
 
 def save_heal(room, target_id):
     room["night"]["heal"] = target_id
 
-
 def save_check(room, target_id):
     room["night"]["check"] = target_id
 
-
 def bot_night_action(room):
-    # Автоматический выбор мафии-бота
     alive_players = [p for p in room["players"] if p["alive"]]
     non_mafia = [p for p in alive_players if p["role"] != "Мафия"]
     if non_mafia:
         target = random.choice(non_mafia)
         room["night"]["kill"] = target["id"]
 
-
 def finish_night(room):
     night = room["night"]
-    killed_id = night["kill"]
-    healed_id = night["heal"]
+    killed_id = night.get("kill")
+    healed_id = night.get("heal")
     
     dead_player = None
     
@@ -104,22 +97,18 @@ def finish_night(room):
     winner = check_winner(room)
     return dead_player, winner
 
-
 def save_vote(room, voter_id, target_id):
     room["day"]["votes"][voter_id] = target_id
-
 
 def bot_vote(room):
     alive_players = [p for p in room["players"] if p["alive"]]
     alive_bots = [p for p in alive_players if p.get("bot")]
     
     for bot in alive_bots:
-        # Боты выбирают случайную живую жертву для дневного голосования (исключая себя)
         possible_targets = [p for p in alive_players if p["id"] != bot["id"]]
         if possible_targets:
             target = random.choice(possible_targets)
             room["day"]["votes"][bot["id"]] = target["id"]
-
 
 def end_day(room):
     votes = room["day"]["votes"]
@@ -131,17 +120,14 @@ def end_day(room):
     for voter_id, target_id in votes.items():
         vote_counts[target_id] = vote_counts.get(target_id, 0) + 1
         
-    # Сбрасываем голоса для следующего дня
     room["day"]["votes"] = {}
     
     if not vote_counts:
         return None, {}
         
-    # Находим максимальное количество голосов
     max_votes = max(vote_counts.values())
     top_targets = [t_id for t_id, count in vote_counts.items() if count == max_votes]
     
-    # Если за лидера голосов больше одного (ничья), никто не выбывает
     if len(top_targets) > 1:
         return None, vote_counts
         
@@ -157,7 +143,6 @@ def end_day(room):
             
     return kicked_player, vote_counts
 
-
 def check_winner(room):
     alive_players = [p for p in room["players"] if p["alive"]]
     
@@ -171,7 +156,6 @@ def check_winner(room):
         
     return None
 
-
 def get_formatted_player_list(room) -> str:
     text = "📋 <b>АКТУАЛЬНЫЙ СТАТУС СЕТИ:</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
     for p in room["players"]:
@@ -179,13 +163,11 @@ def get_formatted_player_list(room) -> str:
         text += f"• <b>{p['name']}</b> — {status}\n"
     return text
 
-
 async def get_bot_chat_messages(room):
     alive_bots = [p for p in room["players"] if p.get("bot") and p["alive"]]
     if not alive_bots:
         return []
     
-    # Выбираем от 2 до 3 случайных ботов для утренней беседы, чтобы они говорили по очереди
     num_speakers = min(len(alive_bots), random.randint(2, 3))
     speaking_bots = random.sample(alive_bots, num_speakers)
     

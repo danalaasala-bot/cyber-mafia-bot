@@ -23,7 +23,6 @@ def get_or_create_room(chat_id: int):
         }
     return rooms[chat_id]
 
-
 def get_main_menu_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🕹️ Создать игру", callback_data="menu_create_lobby")],
@@ -32,12 +31,10 @@ def get_main_menu_keyboard():
         [InlineKeyboardButton(text="📖 Как играть (Правила)", callback_data="menu_rules")]
     ])
 
-
 def get_back_to_menu_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔙 На главную", callback_data="back_to_menu")]
     ])
-
 
 def get_lobby_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -46,7 +43,6 @@ def get_lobby_keyboard():
         [InlineKeyboardButton(text="🚀 Запустить матч", callback_data="start_game")],
         [InlineKeyboardButton(text="🔙 На главную", callback_data="back_to_menu")]
     ])
-
 
 def get_target_keyboard(room: dict, current_user_id: int, prefix: str):
     alive_players = [p for p in room["players"] if p["alive"] and p["id"] != current_user_id]
@@ -63,7 +59,6 @@ def get_target_keyboard(room: dict, current_user_id: int, prefix: str):
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-
 @router.message(Command("start"))
 async def cmd_start(message: Message):
     text = (
@@ -73,7 +68,6 @@ async def cmd_start(message: Message):
     )
     await message.answer(text, reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
 
-
 @router.callback_query(F.data == "back_to_menu")
 async def cb_back_to_menu(callback: CallbackQuery):
     text = (
@@ -82,7 +76,6 @@ async def cb_back_to_menu(callback: CallbackQuery):
         "Выберите нужный пункт с помощью кнопок ниже:"
     )
     await callback.message.edit_text(text, reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
-
 
 @router.callback_query(F.data == "menu_create_lobby")
 async def cb_create_lobby(callback: CallbackQuery):
@@ -98,7 +91,9 @@ async def cb_create_lobby(callback: CallbackQuery):
         room["players"].append({
             "id": user.id,
             "name": user.full_name or user.first_name,
-            "bot": False
+            "bot": False,
+            "alive": True,
+            "role": None
         })
 
     text = (
@@ -109,13 +104,12 @@ async def cb_create_lobby(callback: CallbackQuery):
     )
     await callback.message.edit_text(text, reply_markup=get_lobby_keyboard(), parse_mode=ParseMode.HTML)
 
-
 @router.callback_query(F.data == "menu_join_lobby")
 async def cb_menu_join_lobby(callback: CallbackQuery):
     chat_id = callback.message.chat.id
     room = rooms.get(chat_id)
 
-    if not room or room["phase"] == "lobby":
+    if room and not room["started"]:
         text = (
             "🎮 <b>Игровое лобби</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -124,7 +118,6 @@ async def cb_menu_join_lobby(callback: CallbackQuery):
         await callback.message.edit_text(text, reply_markup=get_lobby_keyboard(), parse_mode=ParseMode.HTML)
     else:
         await callback.answer("❌ Сейчас нет открытых комнат. Создайте новую игру!", show_alert=True)
-
 
 @router.callback_query(F.data == "menu_stats")
 async def cb_menu_stats(callback: CallbackQuery):
@@ -140,7 +133,6 @@ async def cb_menu_stats(callback: CallbackQuery):
     )
     await callback.message.edit_text(text, reply_markup=get_back_to_menu_keyboard(), parse_mode=ParseMode.HTML)
 
-
 @router.callback_query(F.data == "menu_rules")
 async def cb_menu_rules(callback: CallbackQuery):
     text = (
@@ -151,7 +143,6 @@ async def cb_menu_rules(callback: CallbackQuery):
         "3. 🎯 <b>Цель:</b> Мирные ищут мафию, а мафия пытается захватить контроль."
     )
     await callback.message.edit_text(text, reply_markup=get_back_to_menu_keyboard(), parse_mode=ParseMode.HTML)
-
 
 @router.callback_query(F.data == "join_game")
 async def cb_join_game(callback: CallbackQuery):
@@ -169,7 +160,9 @@ async def cb_join_game(callback: CallbackQuery):
     room["players"].append({
         "id": user.id,
         "name": user.full_name or user.first_name,
-        "bot": False
+        "bot": False,
+        "alive": True,
+        "role": None
     })
 
     await callback.answer("✅ Вы успешно вошли в игру!")
@@ -181,7 +174,6 @@ async def cb_join_game(callback: CallbackQuery):
         f"👥 <b>Игроков в лобби:</b> <b>{len(room['players'])}</b>"
     )
     await callback.message.edit_text(text, reply_markup=get_lobby_keyboard(), parse_mode=ParseMode.HTML)
-
 
 @router.callback_query(F.data == "add_bot")
 async def cb_add_bot(callback: CallbackQuery):
@@ -197,7 +189,9 @@ async def cb_add_bot(callback: CallbackQuery):
     room["players"].append({
         "id": bot_id,
         "name": bot_name,
-        "bot": True
+        "bot": True,
+        "alive": True,
+        "role": None
     })
 
     await callback.answer(f"🤖 Бот {bot_name} добавлен!")
@@ -210,6 +204,40 @@ async def cb_add_bot(callback: CallbackQuery):
     )
     await callback.message.edit_text(text, reply_markup=get_lobby_keyboard(), parse_mode=ParseMode.HTML)
 
+@router.callback_query(F.data == "start_game")
+async def cb_start_game(callback: CallbackQuery, bot: Bot):
+    chat_id = callback.message.chat.id
+    room = get_or_create_room(chat_id)
+
+    if room["started"]:
+        await callback.answer("⚠️ Игра уже идет!", show_alert=True)
+        return
+
+    if len(room["players"]) < 3:
+        await callback.answer("⚠️ Нужно минимум 3 игрока (включая ботов)!", show_alert=True)
+        return
+
+    room["started"] = True
+    room["is_private"] = callback.message.chat.type == "private"
+    game.start_game(room)
+
+    await callback.message.edit_text(
+        "🚀 <b>Матч начался!</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "Роли успешно распределены. Проверьте личные сообщения с ботом.",
+        parse_mode=ParseMode.HTML
+    )
+
+    for player in room["players"]:
+        if not player.get("bot"):
+            role_card = game.get_role_card(player["role"])
+            target_chat_id = chat_id if room["is_private"] else player["id"]
+            try:
+                await bot.send_message(target_chat_id, role_card, parse_mode=ParseMode.HTML)
+            except Exception:
+                await callback.message.answer(f"⚠️ Не удалось отправить роль игроку <b>{player['name']}</b>. Напишите боту в ЛС!", parse_mode=ParseMode.HTML)
+
+    await start_night_phase(bot, chat_id, room)
 
 async def start_night_phase(bot: Bot, chat_id: int, room: dict):
     room["phase"] = "night"
@@ -248,7 +276,6 @@ async def start_night_phase(bot: Bot, chat_id: int, room: dict):
         game.bot_night_action(room)
         await start_doctor_phase(bot, chat_id, room)
 
-
 async def start_doctor_phase(bot: Bot, chat_id: int, room: dict):
     room["night"]["subphase"] = "doctor"
     is_private_chat = room.get("is_private", False)
@@ -278,10 +305,8 @@ async def start_doctor_phase(bot: Bot, chat_id: int, room: dict):
         await asyncio.sleep(3)
         alive_targets = [p for p in room["players"] if p["alive"]]
         if alive_targets:
-            import random
             room["night"]["heal"] = random.choice(alive_targets)["id"]
         await start_cop_phase(bot, chat_id, room)
-
 
 async def start_cop_phase(bot: Bot, chat_id: int, room: dict):
     room["night"]["subphase"] = "cop"
@@ -312,11 +337,9 @@ async def start_cop_phase(bot: Bot, chat_id: int, room: dict):
         await asyncio.sleep(3)
         un_checked = [p for p in room["players"] if p["id"] != cop_players[0]["id"] and p["alive"]]
         if un_checked:
-            import random
             target = random.choice(un_checked)
-            room["night"]["checked_mafia_id"] = target["id"]
+            room["night"]["check"] = target["id"]
         await finish_night_phase(bot, chat_id, room)
-
 
 async def finish_night_phase(bot: Bot, chat_id: int, room: dict):
     await bot.send_message(
@@ -329,52 +352,24 @@ async def finish_night_phase(bot: Bot, chat_id: int, room: dict):
     dead_player, winner = game.finish_night(room)
     room["phase"] = "day"
 
-    await process_morning_results(bot, chat_id, room, dead_player, winner)
+    if winner:
+        await announce_winner(bot, chat_id, winner, room)
+        return
+
+    if dead_player:
+        text = f"☀️ <b>Итоги ночи</b>\n━━━━━━━━━━━━━━━━━━━━━━\n💀 Прошлой ночью был убит: <b>{dead_player['name']}</b> (Роль: <i>{dead_player['role']}</i>)"
+    else:
+        text = "☀️ <b>Итоги ночи</b>\n━━━━━━━━━━━━━━━━━━━━━━\n🎉 Прекрасные новости! Ночь обошлась без жертв."
+
+    await bot.send_message(chat_id, text, parse_mode=ParseMode.HTML)
+    await bot.send_message(chat_id, game.get_formatted_player_list(room), parse_mode=ParseMode.HTML)
     
-    if not winner:
-        # Выводим утреннюю болтовню ботов
-        bot_messages = await game.get_bot_chat_messages(room)
-        for b_name, b_text in bot_messages:
-            await bot.send_message(chat_id, f"💬 <b>{b_name}:</b> {b_text}", parse_mode=ParseMode.HTML)
-            await asyncio.sleep(1)
+    bot_messages = await game.get_bot_chat_messages(room)
+    for b_name, b_text in bot_messages:
+        await bot.send_message(chat_id, f"💬 <b>{b_name}:</b> {b_text}", parse_mode=ParseMode.HTML)
+        await asyncio.sleep(1)
 
-        await send_day_voting_message(bot, chat_id, room)
-
-
-@router.callback_query(F.data == "start_game")
-async def cb_start_game(callback: CallbackQuery, bot: Bot):
-    chat_id = callback.message.chat.id
-    room = get_or_create_room(chat_id)
-
-    if room["started"]:
-        await callback.answer("⚠️ Игра уже идет!", show_alert=True)
-        return
-
-    if len(room["players"]) < 3:
-        await callback.answer("⚠️ Нужно минимум 3 игрока (включая ботов)!", show_alert=True)
-        return
-
-    room["is_private"] = callback.message.chat.type == "private"
-    game.start_game(room)
-
-    await callback.message.edit_text(
-        "🚀 <b>Матч начался!</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "Роли успешно распределены. Проверьте личные сообщения с ботом.",
-        parse_mode=ParseMode.HTML
-    )
-
-    for player in room["players"]:
-        if not player.get("bot"):
-            role_card = game.get_role_card(player["role"])
-            target_chat_id = chat_id if room["is_private"] else player["id"]
-            try:
-                await bot.send_message(target_chat_id, role_card, parse_mode=ParseMode.HTML)
-            except Exception:
-                await callback.message.answer(f"⚠️ Не удалось отправить роль игроку <b>{player['name']}</b>. Напишите боту в ЛС!", parse_mode=ParseMode.HTML)
-
-    await start_night_phase(bot, chat_id, room)
-
+    await send_day_voting_message(bot, chat_id, room)
 
 @router.callback_query(F.data.startswith("night_"))
 async def cb_night_action(callback: CallbackQuery, bot: Bot):
@@ -397,26 +392,34 @@ async def cb_night_action(callback: CallbackQuery, bot: Bot):
     if action_type == "kill" and subphase == "mafia":
         game.save_kill(room, target_id)
         await callback.answer(f"🎯 Цель выбрана: {target_player['name']}")
-        await callback.message.edit_reply_markup(reply_markup=None)
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
         await start_doctor_phase(bot, chat_id, room)
 
     elif action_type == "heal" and subphase == "doctor":
         game.save_heal(room, target_id)
         await callback.answer(f"🩺 Вылечен: {target_player['name']}")
-        await callback.message.edit_reply_markup(reply_markup=None)
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
         await start_cop_phase(bot, chat_id, room)
 
     elif action_type == "check" and subphase == "cop":
         game.save_check(room, target_id)
-        is_mafia = target_player.get("role") in ["Мафия", "MAFIA"]
+        is_mafia = target_player.get("role") == "Мафия"
         status_text = "<b>МАФИЯ 🔪</b>" if is_mafia else "<b>МИРНЫЙ ЖИТЕЛЬ 🌾</b>"
         await callback.message.answer(f"🕵️‍♂️ <b>Результат проверки:</b> {target_player['name']} — {status_text}", parse_mode=ParseMode.HTML)
         await callback.answer("Проверка завершена!")
-        await callback.message.edit_reply_markup(reply_markup=None)
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
         await finish_night_phase(bot, chat_id, room)
     else:
         await callback.answer("⚠️ Сейчас не ваш ход!", show_alert=True)
-
 
 async def send_day_voting_message(bot: Bot, chat_id: int, room: dict):
     room["day"]["votes"] = {}
@@ -459,7 +462,6 @@ async def send_day_voting_message(bot: Bot, chat_id: int, room: dict):
         except Exception:
             await bot.send_message(chat_id, f"⚠️ {human['name']}, откройте ЛС с ботом для голосования!", parse_mode=ParseMode.HTML)
 
-
 @router.callback_query(F.data.startswith("day_vote_"))
 async def cb_day_vote(callback: CallbackQuery, bot: Bot):
     data_parts = callback.data.split("_")
@@ -472,31 +474,20 @@ async def cb_day_vote(callback: CallbackQuery, bot: Bot):
         return
 
     voter_id = callback.from_user.id
-    
     player_check = next((p for p in room["players"] if p["id"] == voter_id), None)
-    if not player_check:
-        await callback.answer("⚠️ Вы не участник этой игры.", show_alert=True)
+    
+    if not player_check or not player_check["alive"]:
+        await callback.answer("⚠️ Вы не можете голосовать.", show_alert=True)
         return
 
-    if not player_check["alive"]:
-        await callback.answer("👀 Вы мертвы и можете только наблюдать за игрой.", show_alert=True)
-        return
-
-    # Защита от повторного клика / двойного голоса
     if voter_id in room["day"]["votes"]:
-        await callback.answer("⚠️ Вы уже проголосовали в этом раунде!", show_alert=True)
-        # Убираем клавиатуру у пользователя, чтобы не нажимал повторно
-        try:
-            await callback.message.edit_reply_markup(reply_markup=None)
-        except Exception:
-            pass
+        await callback.answer("⚠️ Вы уже проголосовали!", show_alert=True)
         return
 
     game.save_vote(room, voter_id, target_id)
     target_player = next((p for p in room["players"] if p["id"] == target_id), None)
     
     await callback.answer(f"✅ Ваш голос против {target_player['name']} учтен!")
-    
     try:
         await callback.message.edit_reply_markup(reply_markup=None)
     except Exception:
@@ -518,23 +509,6 @@ async def cb_day_vote(callback: CallbackQuery, bot: Bot):
             await asyncio.sleep(2)
             await start_night_phase(bot, chat_id, room)
 
-
-async def process_morning_results(bot: Bot, chat_id, room, dead_player, winner):
-    if winner:
-        await announce_winner(bot, chat_id, winner, room)
-        return
-
-    if dead_player:
-        text = f"☀️ <b>Итоги ночи</b>\n━━━━━━━━━━━━━━━━━━━━━━\n💀 Прошлой ночью был убит: <b>{dead_player['name']}</b> (Роль: <i>{dead_player['role']}</i>)"
-    else:
-        text = "☀️ <b>Итоги ночи</b>\n━━━━━━━━━━━━━━━━━━━━━━\n🎉 Прекрасные новости! Ночь обошлась без жертв."
-
-    await bot.send_message(chat_id, text, parse_mode=ParseMode.HTML)
-    
-    player_list = game.get_formatted_player_list(room)
-    await bot.send_message(chat_id, player_list, parse_mode=ParseMode.HTML)
-
-
 async def process_evening_results(bot: Bot, chat_id, room, kicked_player, votes):
     voting_details = []
     for voter_id, target_id in votes.items():
@@ -547,24 +521,24 @@ async def process_evening_results(bot: Bot, chat_id, room, kicked_player, votes)
 
     if kicked_player:
         text = (
-            f"🌆 <b>Итоги трибунала и голосование</b>\n"
+            f"🌆 <b>Итоги трибунала</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📋 <b>Как распределились голоса:</b>\n{votes_text}\n\n"
+            f"📋 <b>Голоса:</b>\n{votes_text}\n\n"
             f"⚖️ Большинством голосов изгнан: <b>{kicked_player['name']}</b> (Роль: <i>{kicked_player['role']}</i>)"
         )
     else:
         text = (
-            f"🌆 <b>Итоги трибунала и голосование</b>\n"
+            f"🌆 <b>Итоги трибунала</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📋 <b>Как распределились голоса:</b>\n{votes_text}\n\n"
+            f"📋 <b>Голоса:</b>\n{votes_text}\n\n"
             f"🤝 Голоса разделились поровну, никто не изгнан."
         )
 
     await bot.send_message(chat_id, text, parse_mode=ParseMode.HTML)
 
-
 async def announce_winner(bot: Bot, chat_id, winner, room=None):
     if room:
+        room["started"] = False
         stats.update_game_results(room, winner)
 
     if winner == "mafia":
