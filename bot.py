@@ -1,9 +1,7 @@
 import asyncio
 import logging
-import os
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
-from aiohttp import web
 
 from config import TOKEN
 from handlers import router
@@ -13,25 +11,6 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
 active_timers = {}
-
-# --- Надежный веб-сервер для Render ---
-routes = web.RouteTableDef()
-
-@routes.get("/")
-async def hello(request):
-    return web.Response(text="Mafia Bot is running!")
-
-async def start_web_server():
-    app = web.Application()
-    app.add_routes(routes)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    
-    port = int(os.getenv("PORT", 10000))
-    site = web.TCPSite(runner, "0.0.0.0", port)
-    await site.start()
-    print(f"Web server started on port {port}")
-# -----------------------------------------------------------
 
 
 async def start_phase_timer(chat_id: int, room: dict, phase: str, duration: int = 45):
@@ -70,7 +49,8 @@ async def _timer_coroutine(chat_id: int, room: dict, phase: str, duration: int):
             await process_morning_results(chat_id, room, dead_player, winner)
             if not winner:
                 from handlers import send_day_voting_message
-                await start_phase_timer(chat_id, room, phase="day", duration=60)
+                # Увеличили время дня до 180 секунд (3 минуты), чтобы все успевали проголосовать
+                await start_phase_timer(chat_id, room, phase="day", duration=180)
                 await send_day_voting_message(bot, chat_id, room)
 
         elif phase == "day":
@@ -84,7 +64,8 @@ async def _timer_coroutine(chat_id: int, room: dict, phase: str, duration: int):
             await process_evening_results(chat_id, room, kicked_player)
             winner = game.check_winner(room)
             if not winner:
-                await start_phase_timer(chat_id, room, phase="night", duration=45)
+                # Ночь сделали чуть длиннее (60 секунд) для комфорта
+                await start_phase_timer(chat_id, room, phase="night", duration=60)
 
     except asyncio.CancelledError:
         pass
@@ -135,12 +116,9 @@ async def announce_winner(chat_id, winner):
 
 
 async def main():
-    # Запускаем веб-сервер в фоновой задаче, чтобы порт открылся моментально
-    asyncio.create_task(start_web_server())
-    
     dp.include_router(router)
     logging.basicConfig(level=logging.INFO)
-    print("Бот и веб-сервер запущены!")
+    print("Бот успешно запущен!")
     await dp.start_polling(bot)
 
 
