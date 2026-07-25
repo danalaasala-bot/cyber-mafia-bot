@@ -428,6 +428,7 @@ async def cb_night_action(callback: CallbackQuery, bot: Bot):
 # --- 6. ДНЕВНОЕ ГОЛОСОВАНИЕ ---
 
 async def send_day_voting_message(bot: Bot, chat_id: int, room: dict):
+    # Автоматически проголосовываем ботов перед началом сбора голосов людей
     game.bot_vote(room)
     
     alive_humans = [p for p in room["players"] if p["alive"] and not p.get("bot")]
@@ -453,15 +454,21 @@ async def send_day_voting_message(bot: Bot, chat_id: int, room: dict):
             await start_night_phase(bot, chat_id, room)
         return
 
-    current_human_id = alive_humans[0]["id"]
-    kb = get_target_keyboard(room, current_human_id, f"day_vote_{chat_id}")
-    
     text = (
         "☀️ <b>Дневной трибунал (Голосование)</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         "Обсудите улики и выберите игрока, которого хотите изгнать:"
     )
-    await bot.send_message(chat_id, text, reply_markup=kb, parse_mode=ParseMode.HTML)
+    
+    # Рассылаем клавиатуру голосования КАЖДОМУ живому игроку-человеку
+    for human in alive_humans:
+        kb = get_target_keyboard(room, human["id"], f"day_vote_{chat_id}")
+        target_chat = chat_id if room.get("is_private", False) else human["id"]
+        try:
+            await bot.send_message(target_chat, text, reply_markup=kb, parse_mode=ParseMode.HTML)
+        except Exception:
+            # Если боту в ЛС написать не получилось, дублируем в общий чат
+            await bot.send_message(chat_id, f"⚠️ {human['name']}, откройте ЛС с ботом для голосования!", parse_mode=ParseMode.HTML)
 
 
 @router.callback_query(F.data.startswith("day_vote_"))
