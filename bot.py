@@ -134,7 +134,7 @@ async def announce_winner(chat_id, winner):
 async def main():
     # Запускаем веб-сервер в фоновой задаче, чтобы порт открылся моментально
     asyncio.create_task(start_web_server())
-    
+
     dp.include_router(router)
     logging.basicConfig(level=logging.INFO)
     print("Бот и веб-сервер запущены!")
